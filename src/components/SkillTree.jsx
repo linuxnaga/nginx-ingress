@@ -6,7 +6,22 @@ export default function SkillTree({ view, onSelect }) {
   const { done } = useGame()
   return (
     <nav className="flex flex-col gap-2">
-      <div className="px-1 text-[10px] font-bold uppercase tracking-[0.2em] text-slate-500">Skill Tree</div>
+      <div className="grid grid-cols-2 gap-2">
+        {[
+          ['guide', 'Start here', Icons.Compass, '#009639'],
+          ['reference', 'Components', Icons.Library, '#326ce5'],
+        ].map(([id, label, Ic, c]) => (
+          <button
+            key={id}
+            onClick={() => onSelect(id)}
+            className={`flex items-center gap-2 rounded-lg border px-2.5 py-2 text-left text-xs font-semibold transition ${view === id ? 'bg-panel2 text-white' : 'border-edge bg-panel/60 text-slate-300 hover:bg-panel2'}`}
+            style={view === id ? { borderColor: c } : undefined}
+          >
+            <Ic size={15} color={c} /> {label}
+          </button>
+        ))}
+      </div>
+      <div className="mt-2 px-1 text-[10px] font-bold uppercase tracking-[0.2em] text-slate-500">Skill Tree</div>
       <div className="relative flex flex-col gap-2">
         <div className="absolute bottom-6 left-[22px] top-6 w-px bg-gradient-to-b from-k8s via-nginx to-flow opacity-40" />
         {MODULES.map((m) => {

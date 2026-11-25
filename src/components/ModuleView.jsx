@@ -12,6 +12,8 @@ import TransportLab from './labs/TransportLab.jsx'
 import StormLab from './labs/StormLab.jsx'
 import MetricsLab from './labs/MetricsLab.jsx'
 import MigrationLab from './labs/MigrationLab.jsx'
+import LabGuide from './LabGuide.jsx'
+import { LAB_GUIDES } from '../data/guides.js'
 
 const LABS = {
   m1: [{ id: 'loop', label: 'Control Loop Console', icon: Icons.RefreshCcw, C: ControlLoopLab, tasks: ['m1-apply', 'm1-scale-oss', 'm1-scale-plus'] }],
@@ -105,6 +107,7 @@ export default function ModuleView({ module }) {
           )
         }
       >
+        <LabGuide key={`g-${lab.id}`} guide={LAB_GUIDES[lab.id]} accent={module.accent} />
         <lab.C key={lab.id} cluster={cluster} />
       </Panel>
 

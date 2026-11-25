@@ -8,7 +8,43 @@ A gamified learning and architecture flow simulator for the **F5 NGINX Ingress C
 npm install
 npm run dev      # http://localhost:5173
 npm run build    # static site in dist/, works from any sub-path
+npm run docs     # regenerate docs/*.md from src/data/*.js
 ```
+
+## Documentation
+
+- **[Lab Guide](docs/LAB_GUIDE.md)**: step-by-step instructions for every lab and mission, what to watch, and the key takeaway from each.
+- **[Component Reference](docs/COMPONENTS.md)**: what each Kubernetes object, NIC custom resource, controller part and NGINX process does, with its inputs, outputs and a kubectl command.
+
+The same material is in the app. Use **Start here** and **Components** at the top of the sidebar, the **How to run this lab** panel above every lab, and **Read the full component reference** on each inspector card.
+
+## How to run the labs (quick version)
+
+1. Open **Start here** in the sidebar, then go to **Module 1**.
+2. Click nodes in the **Dual-Plane Architecture Flow** diagram to read what each component does. Use the **NGINX Open Source / NGINX Plus** switch to change how endpoint changes are applied.
+3. In the **Lab Console**, follow the numbered steps in **How to run this lab**. Labs only affect traffic after you press **kubectl apply**, just like a real cluster.
+4. Check the **Module objectives** panel. Each objective you complete adds XP.
+5. Pass the **Knowledge Check** (75%) at the bottom of the module.
+6. After the modules, play the three **Missions**. Each has its own walkthrough and live objective checklist.
+
+## Components at a glance
+
+| Layer | Component | One-line role |
+|---|---|---|
+| Kubernetes | API Server | Stores manifests and streams watch events to NIC |
+| Kubernetes | Service / EndpointSlice | Groups pods; EndpointSlices list the ready pod IPs NIC proxies to |
+| Kubernetes | Secret / ConfigMap | TLS keys and CAs / global NGINX settings (nginx.conf) |
+| NIC CRD | VirtualServer / VirtualServerRoute | Typed L7 routing for a host, with cross-namespace delegation |
+| NIC CRD | Policy | rateLimit, jwt, oidc, mTLS, accessControl, waf, attached to a VS or route |
+| NIC CRD | GlobalConfiguration / TransportServer | L4 listeners / TCP and UDP load balancing |
+| IC process | Informers → Workqueue → Controller | Watch, deduplicate and process changes |
+| IC process | Configurator | Renders NGINX config from Go templates |
+| IC process | Manager | Writes files, reloads NGINX, calls the Plus API |
+| NGINX | Master | Loads config and swaps worker generations on reload |
+| NGINX | Workers | Serve traffic: routing, policies, proxying to pod IPs |
+| NGINX Plus | REST API / dashboard | Updates upstreams without a reload; live metrics |
+
+See [docs/COMPONENTS.md](docs/COMPONENTS.md) for the full descriptions.
 
 ## What's inside
 
@@ -41,6 +77,8 @@ The generated NGINX config and the traffic and memory models are teaching approx
 ```
 src/
   data/curriculum.js     modules, quizzes, missions, badges, ranks, inspector cards
+  data/guides.js         step-by-step lab and mission instructions
+  data/components.js     component reference
   lib/compile.js         mini "Configurator": VirtualServer/Policy/TransportServer → nginx config
   lib/useCluster.js      simulated cluster: OSS/Plus mode, reloads, animated packets
   components/            HUD, skill tree, flow canvas, inspector, quiz, module & mission views

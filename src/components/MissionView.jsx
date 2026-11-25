@@ -7,6 +7,8 @@ import { Button, Panel } from './ui.jsx'
 import CanaryLab from './labs/CanaryLab.jsx'
 import PolicyLab, { DEFAULT_POLICY } from './labs/PolicyLab.jsx'
 import StormLab from './labs/StormLab.jsx'
+import LabGuide from './LabGuide.jsx'
+import { MISSION_GUIDES } from '../data/guides.js'
 
 const OFF_POLICY = {
   ...DEFAULT_POLICY,
@@ -137,6 +139,7 @@ function MissionRun({ mission, onRestart }) {
       <ArchitecturePanel cluster={cluster} focus={[]} selected={selected} onSelect={setSelected} />
 
       <Panel title="Mission Console" icon={Icons.Swords} accent="#f59e0b">
+        <LabGuide title="Mission walkthrough" accent="#f59e0b" steps={MISSION_GUIDES[mission.id].steps} tips={MISSION_GUIDES[mission.id].tips} />
         {mission.id === 'mission-1' && <CanaryLab cluster={cluster} onReport={setR1} />}
         {mission.id === 'mission-2' && <PolicyLab cluster={cluster} initial={OFF_POLICY} onPolicy={setPol} onReport={setR2} />}
         {mission.id === 'mission-3' && <StormLab cluster={cluster} onReport={(r) => setRuns((x) => [...x, r])} />}
