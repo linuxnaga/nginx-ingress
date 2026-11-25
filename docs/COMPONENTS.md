@@ -2,7 +2,7 @@
 
 # Component Reference
 
-What each part of an F5 NGINX Ingress Controller deployment does, from the Kubernetes objects it watches to the NGINX processes that serve traffic.
+What each part of an F5 NGINX Ingress Controller deployment does, from the Kubernetes objects it watches to the NGINX processes that serve traffic. Every command has a worked example: what to type, sample output from the cafe demo cluster, and what to look for. Sample output is illustrative, so names, IPs and ages will differ in your cluster.
 
 ```mermaid
 flowchart LR
@@ -73,10 +73,78 @@ NIC never receives manifests directly. It opens watches through the API server f
 | **In** | kubectl apply / Helm / GitOps writes |
 | **Out** | Watch events to the NIC informers; status updates from NIC |
 
+**Commands** (expand for a worked example)
+
+<details>
+<summary><code>kubectl get vs,vsr,ts,policy -A</code></summary>
+
 ```bash
-kubectl get vs,vsr,ts,policy -A
-kubectl describe vs cafe
+$ kubectl get vs,vsr,ts,policy -A
 ```
+
+Sample output:
+
+```text
+NAMESPACE   NAME                                    STATE   HOST               IP             PORTS      AGE
+default     virtualserver.k8s.nginx.org/cafe        Valid   cafe.example.com   203.0.113.10   [80,443]   2d
+default     virtualserver.k8s.nginx.org/checkout    Valid   shop.example.com   203.0.113.10   [80,443]   5h
+
+NAMESPACE   NAME                                          STATE   HOST               IP             PORTS      AGE
+tea-team    virtualserverroute.k8s.nginx.org/tea-vsr      Valid   cafe.example.com   203.0.113.10   [80,443]   2d
+
+NAMESPACE   NAME                                   STATE   REASON          AGE
+default     transportserver.k8s.nginx.org/dns      Valid   AddedOrUpdated  3h
+
+NAMESPACE   NAME                                         STATE   AGE
+default     policy.k8s.nginx.org/rate-limit-policy       Valid   5h
+default     policy.k8s.nginx.org/jwt-policy              Valid   5h
+```
+
+**What to look for:** The STATE column is filled in by the IC after it validates each resource. Anything other than Valid (Warning or Invalid) means NGINX is not serving what you applied, so run kubectl describe on it next.
+
+</details>
+
+<details>
+<summary><code>kubectl describe vs cafe</code></summary>
+
+```bash
+$ kubectl describe vs cafe
+```
+
+Sample output:
+
+```text
+Name:         cafe
+Namespace:    default
+API Version:  k8s.nginx.org/v1
+Kind:         VirtualServer
+Spec:
+  Host:  cafe.example.com
+  Routes:
+    Path:  /coffee
+    Splits:
+      Action:
+        Pass:  coffee-v1
+      Weight:  90
+      Action:
+        Pass:  coffee-v2
+      Weight:  10
+Status:
+  External Endpoints:
+    Ip:     203.0.113.10
+    Ports:  [80,443]
+  Message:  Configuration for default/cafe was added or updated
+  Reason:   AddedOrUpdated
+  State:    Valid
+Events:
+  Type    Reason          Age   From                      Message
+  ----    ------          ----  ----                      -------
+  Normal  AddedOrUpdated  12s   nginx-ingress-controller  Configuration for default/cafe was added or updated
+```
+
+**What to look for:** Check Status.State and Message first, then Events. An Invalid VirtualServer shows the exact validation error here, for example "spec.routes[0].splits: Invalid value: weights must sum to 100".
+
+</details>
 
 <a id="ingress"></a>
 
@@ -91,10 +159,44 @@ NIC turns each Ingress into conf.d/<namespace>-<name>.conf. Anything beyond host
 | **In** | Developer manifests |
 | **Out** | A server block per host in the generated config |
 
+**Commands** (expand for a worked example)
+
+<details>
+<summary><code>kubectl get ingressclass</code></summary>
+
 ```bash
-kubectl get ingressclass
-kubectl get ingress -A
+$ kubectl get ingressclass
 ```
+
+Sample output:
+
+```text
+NAME    CONTROLLER                     PARAMETERS   AGE
+nginx   nginx.org/ingress-controller   <none>       14d
+```
+
+**What to look for:** The CONTROLLER for F5 NIC is nginx.org/ingress-controller. The community ingress-nginx uses k8s.io/ingress-nginx. If both are installed, every Ingress needs the right ingressClassName.
+
+</details>
+
+<details>
+<summary><code>kubectl get ingress -A</code></summary>
+
+```bash
+$ kubectl get ingress -A
+```
+
+Sample output:
+
+```text
+NAMESPACE   NAME           CLASS   HOSTS              ADDRESS        PORTS     AGE
+default     legacy-cafe    nginx   old.example.com    203.0.113.10   80, 443   30d
+shop        storefront     nginx   www.example.com    203.0.113.10   80        12d
+```
+
+**What to look for:** ADDRESS is written by the NIC status updater. If it is empty, the Ingress class does not match or leader election has not finished. These are the candidates to migrate to VirtualServer.
+
+</details>
 
 <a id="svc"></a>
 
@@ -109,10 +211,44 @@ By default NIC does not send traffic to the ClusterIP. It reads the Service's En
 | **In** | Pod labels via selector |
 | **Out** | EndpointSlices that list ready pod IPs |
 
+**Commands** (expand for a worked example)
+
+<details>
+<summary><code>kubectl get svc coffee-svc</code></summary>
+
 ```bash
-kubectl get svc coffee-svc
-kubectl get endpointslices -l kubernetes.io/service-name=coffee-svc
+$ kubectl get svc coffee-v1-svc coffee-v2-svc
 ```
+
+Sample output:
+
+```text
+NAME            TYPE        CLUSTER-IP     EXTERNAL-IP   PORT(S)   AGE
+coffee-v1-svc   ClusterIP   10.96.41.17    <none>        80/TCP    2d
+coffee-v2-svc   ClusterIP   10.96.88.203   <none>        80/TCP    1h
+```
+
+**What to look for:** The PORT here is what upstreams[].port in the VirtualServer must reference. The CLUSTER-IP is not used by NIC unless use-cluster-ip: true is set, because NIC proxies to pod IPs.
+
+</details>
+
+<details>
+<summary><code>kubectl get endpointslices -l kubernetes.io/service-name=coffee-svc</code></summary>
+
+```bash
+$ kubectl get endpointslices -l kubernetes.io/service-name=coffee-v1-svc
+```
+
+Sample output:
+
+```text
+NAME                  ADDRESSTYPE   PORTS   ENDPOINTS                             AGE
+coffee-v1-svc-8xq2m   IPv4          80      10.244.1.11,10.244.1.12,10.244.2.13   2d
+```
+
+**What to look for:** These ENDPOINTS are exactly the "server" lines in the NGINX upstream. If the list is empty, the Service selector matches no Ready pods and NGINX returns 502.
+
+</details>
 
 <a id="endpointslice"></a>
 
@@ -127,9 +263,28 @@ This is the most frequently changing input to NIC. With NGINX Open Source, each 
 | **In** | Pod readiness |
 | **Out** | Upstream membership in NGINX |
 
+**Commands** (expand for a worked example)
+
+<details>
+<summary><code>kubectl get endpointslices -w</code></summary>
+
 ```bash
-kubectl get endpointslices -w
+$ kubectl get endpointslices -l kubernetes.io/service-name=coffee-v1-svc -w
 ```
+
+Sample output:
+
+```text
+NAME                  ADDRESSTYPE   PORTS   ENDPOINTS                             AGE
+coffee-v1-svc-8xq2m   IPv4          80      10.244.1.11,10.244.1.12,10.244.2.13   2d
+coffee-v1-svc-8xq2m   IPv4          80      10.244.1.11,10.244.1.12,10.244.2.13 + 1 more...   2d
+coffee-v1-svc-8xq2m   IPv4          80      10.244.1.11,10.244.1.12,10.244.2.13 + 2 more...   2d
+coffee-v1-svc-8xq2m   IPv4          80      10.244.1.11,10.244.1.12,10.244.2.13   2d
+```
+
+**What to look for:** Each new line is a change the NIC informers also see. On NGINX OSS every line means a reload, and on NGINX Plus it means an API update. Lots of lines per minute (HPA flapping, crash loops) is the warning sign of a reload storm.
+
+</details>
 
 <a id="pods"></a>
 
@@ -144,10 +299,42 @@ Only Ready pods appear in EndpointSlices, so readiness probes decide when a pod 
 | **In** | Requests proxied by NGINX workers |
 | **Out** | Responses |
 
+**Commands** (expand for a worked example)
+
+<details>
+<summary><code>kubectl scale deploy coffee-v2 --replicas=2</code></summary>
+
 ```bash
-kubectl scale deploy coffee-v2 --replicas=2
-kubectl rollout status deploy/coffee-v2
+$ kubectl scale deploy coffee-v2 --replicas=2
 ```
+
+Sample output:
+
+```text
+deployment.apps/coffee-v2 scaled
+```
+
+**What to look for:** This only changes the desired count. The pods join the upstream once they pass their readiness probe. Follow up with rollout status, and on OSS watch the reload counter go up.
+
+</details>
+
+<details>
+<summary><code>kubectl rollout status deploy/coffee-v2</code></summary>
+
+```bash
+$ kubectl rollout status deploy/coffee-v2
+```
+
+Sample output:
+
+```text
+Waiting for deployment "coffee-v2" rollout to finish: 1 of 2 updated replicas are available...
+deployment "coffee-v2" successfully rolled out
+```
+
+**What to look for:** Wait for "successfully rolled out" before shifting split weight to v2. Sending traffic earlier is how the Zero-Downtime Canary mission produces 502s.
+
+</details>
 
 <a id="secret"></a>
 
@@ -162,9 +349,24 @@ The Manager writes referenced Secrets to /etc/nginx/secrets/ inside the pod and 
 | **In** | Certificates and keys you create (for example with cert-manager) |
 | **Out** | Files under /etc/nginx/secrets |
 
+**Commands** (expand for a worked example)
+
+<details>
+<summary><code>kubectl create secret tls cafe-tls --cert=c.crt --key=c.key</code></summary>
+
 ```bash
-kubectl create secret tls cafe-tls --cert=c.crt --key=c.key
+$ kubectl create secret tls cafe-tls --cert=cafe.crt --key=cafe.key
 ```
+
+Sample output:
+
+```text
+secret/cafe-tls created
+```
+
+**What to look for:** Reference it from the VirtualServer with spec.tls.secret: cafe-tls. If the name is wrong or the Secret is invalid, the VS goes to Warning and NGINX rejects TLS handshakes for that host.
+
+</details>
 
 <a id="configmap"></a>
 
@@ -179,9 +381,34 @@ The Configurator renders the main /etc/nginx/nginx.conf from this ConfigMap and 
 | **In** | Platform team settings |
 | **Out** | The main nginx.conf |
 
+**Commands** (expand for a worked example)
+
+<details>
+<summary><code>kubectl -n nginx-ingress edit cm nginx-config</code></summary>
+
 ```bash
-kubectl -n nginx-ingress edit cm nginx-config
+$ kubectl -n nginx-ingress get cm nginx-config -o yaml   # view first, then edit
 ```
+
+Sample output:
+
+```text
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nginx-config
+  namespace: nginx-ingress
+data:
+  worker-processes: "auto"
+  worker-shutdown-timeout: "10s"
+  proxy-buffering: "on"
+  otel-exporter-endpoint: "otel-collector.observability:4317"
+  otel-service-name: "nginx-ingress"
+```
+
+**What to look for:** Keys are global and apply to every host. After you save an edit, the IC logs a reload and nginx_ingress_controller_nginx_reloads_total goes up. A bad value is logged as an error and ignored.
+
+</details>
 
 <a id="lb"></a>
 
@@ -196,9 +423,25 @@ It is pure L4 forwarding. NIC does all the L7 routing. Use externalTrafficPolicy
 | **In** | Client connections |
 | **Out** | Connections to NIC pods |
 
+**Commands** (expand for a worked example)
+
+<details>
+<summary><code>kubectl -n nginx-ingress get svc nginx-ingress</code></summary>
+
 ```bash
-kubectl -n nginx-ingress get svc nginx-ingress
+$ kubectl -n nginx-ingress get svc nginx-ingress
 ```
+
+Sample output:
+
+```text
+NAME            TYPE           CLUSTER-IP     EXTERNAL-IP    PORT(S)                                    AGE
+nginx-ingress   LoadBalancer   10.96.12.240   203.0.113.10   80:31080/TCP,443:31443/TCP,5353:31353/UDP   14d
+```
+
+**What to look for:** EXTERNAL-IP is the address clients and DNS should point at. Every GlobalConfiguration listener port (5353/UDP here) must also appear in PORT(S), or L4 traffic never reaches NGINX.
+
+</details>
 
 ## NIC custom resources (k8s.nginx.org/v1)
 
@@ -217,9 +460,25 @@ The Configurator renders it to conf.d/vs_<namespace>_<name>.conf. splits become 
 | **In** | Developer manifest; Services; Secrets; Policies |
 | **Out** | server, location, upstream, split_clients and map blocks |
 
+**Commands** (expand for a worked example)
+
+<details>
+<summary><code>kubectl get vs cafe -o jsonpath="{.status.state}"</code></summary>
+
 ```bash
-kubectl get vs cafe -o jsonpath="{.status.state}"
+$ kubectl get vs cafe -o jsonpath="{.status.state}{'\n'}{.status.message}{'\n'}"
 ```
+
+Sample output:
+
+```text
+Invalid
+VirtualServer default/cafe was rejected with error: spec.routes[0].splits: Invalid value: "95": the sum of the weights of all splits must be equal to 100
+```
+
+**What to look for:** Handy in CI or scripts. Fail the pipeline if the state is not Valid. The old config keeps serving while the VS is Invalid, so nothing breaks, but your change is not live either.
+
+</details>
 
 <a id="vsr"></a>
 
@@ -234,9 +493,25 @@ The VS route says route: <namespace>/<vsr-name>. The VSR must use the same host,
 | **In** | Delegation from a VirtualServer |
 | **Out** | location blocks inside the parent server |
 
+**Commands** (expand for a worked example)
+
+<details>
+<summary><code>kubectl -n tea-team get vsr</code></summary>
+
 ```bash
-kubectl -n tea-team get vsr
+$ kubectl -n tea-team get vsr
 ```
+
+Sample output:
+
+```text
+NAME      STATE   HOST               IP             PORTS      AGE
+tea-vsr   Valid   cafe.example.com   203.0.113.10   [80,443]   2d
+```
+
+**What to look for:** The HOST must match the parent VirtualServer. If the VS does not delegate to this VSR (route: tea-team/tea-vsr), it shows Warning with "is not referenced by any VirtualServer".
+
+</details>
 
 <a id="policy"></a>
 
@@ -251,10 +526,58 @@ A Policy does nothing until a VirtualServer or VirtualServerRoute references it 
 | **In** | References from VS / VSR |
 | **Out** | Directives in server or location blocks |
 
+**Commands** (expand for a worked example)
+
+<details>
+<summary><code>kubectl get policy</code></summary>
+
 ```bash
-kubectl get policy
-kubectl describe policy rate-limit-policy
+$ kubectl get policy
 ```
+
+Sample output:
+
+```text
+NAME                STATE   AGE
+rate-limit-policy   Valid   5h
+jwt-policy          Valid   5h
+allow-corp          Valid   5h
+```
+
+**What to look for:** Valid only means the Policy itself is well formed. It does nothing until a VirtualServer lists it under spec.policies or routes[].policies.
+
+</details>
+
+<details>
+<summary><code>kubectl describe policy rate-limit-policy</code></summary>
+
+```bash
+$ kubectl describe policy rate-limit-policy
+```
+
+Sample output:
+
+```text
+Name:         rate-limit-policy
+Namespace:    default
+Kind:         Policy
+Spec:
+  Rate Limit:
+    Burst:        20
+    Key:          ${binary_remote_addr}
+    No Delay:     true
+    Rate:         10r/s
+    Reject Code:  429
+    Zone Size:    10M
+Status:
+  Message:  Policy default/rate-limit-policy was added or updated
+  Reason:   AddedOrUpdated
+  State:    Valid
+```
+
+**What to look for:** Check Reject Code: without it NIC returns 503. Check Key too: binary_remote_addr limits per client IP, so make sure the real client IP is preserved at the load balancer.
+
+</details>
 
 <a id="gc"></a>
 
@@ -269,9 +592,36 @@ The IC only reads the one named by the -global-configuration=<namespace>/<name> 
 | **In** | Platform team manifest |
 | **Out** | Listen sockets for TransportServers |
 
+**Commands** (expand for a worked example)
+
+<details>
+<summary><code>kubectl -n nginx-ingress get globalconfiguration</code></summary>
+
 ```bash
-kubectl -n nginx-ingress get globalconfiguration
+$ kubectl -n nginx-ingress get globalconfiguration nginx-configuration -o yaml
 ```
+
+Sample output:
+
+```text
+apiVersion: k8s.nginx.org/v1
+kind: GlobalConfiguration
+metadata:
+  name: nginx-configuration
+  namespace: nginx-ingress
+spec:
+  listeners:
+  - name: dns-udp
+    port: 5353
+    protocol: UDP
+  - name: postgres-tcp
+    port: 5432
+    protocol: TCP
+```
+
+**What to look for:** Its namespace/name must equal the -global-configuration argument of the IC. Otherwise it is ignored and every TransportServer that uses these listeners is rejected.
+
+</details>
 
 <a id="ts"></a>
 
@@ -286,9 +636,25 @@ It claims a GlobalConfiguration listener by name and protocol (or the built-in t
 | **In** | Listener from GlobalConfiguration; Services |
 | **Out** | stream { } server and upstream blocks |
 
+**Commands** (expand for a worked example)
+
+<details>
+<summary><code>kubectl get ts</code></summary>
+
 ```bash
-kubectl get ts
+$ kubectl get ts
 ```
+
+Sample output:
+
+```text
+NAME   STATE     REASON     AGE
+dns    Warning   Rejected   1m
+```
+
+**What to look for:** Rejected TransportServers usually reference a listener name that is not in the GlobalConfiguration, or a listener already claimed by another TS. kubectl describe ts dns shows which one.
+
+</details>
 
 ## Ingress Controller (IC) process: the Go control plane
 
@@ -307,9 +673,31 @@ Event handlers compare the old and new object, ignore changes that do not matter
 | **In** | Watch streams from the API server |
 | **Out** | Keys added to the workqueue |
 
+**Commands** (expand for a worked example)
+
+<details>
+<summary><code>kubectl -n nginx-ingress get deploy nginx-ingress -o jsonpath='{.spec.template.spec.containers[0].args}'</code></summary>
+
 ```bash
--watch-namespace=<ns> limits what is watched
+$ kubectl -n nginx-ingress get deploy nginx-ingress -o jsonpath='{.spec.template.spec.containers[0].args}' | tr ',' '\n'
 ```
+
+Sample output:
+
+```text
+["-nginx-plus=false"
+"-nginx-configmaps=$(POD_NAMESPACE)/nginx-config"
+"-ingress-class=nginx"
+"-watch-namespace=default,tea-team"
+"-enable-custom-resources=true"
+"-global-configuration=nginx-ingress/nginx-configuration"
+"-enable-prometheus-metrics=true"
+"-enable-leader-election=true"]
+```
+
+**What to look for:** -watch-namespace limits which namespaces the informers watch. Resources outside it are invisible to NIC, which is a common reason a VirtualServer gets no STATE at all.
+
+</details>
 
 <a id="workqueue"></a>
 
@@ -324,9 +712,27 @@ Duplicate keys collapse while they wait, so ten quick edits to one resource prod
 | **In** | Keys from informers |
 | **Out** | One item at a time to the sync handler |
 
+**Commands** (expand for a worked example)
+
+<details>
+<summary><code>curl -s &lt;pod-ip&gt;:9113/metrics | grep workqueue</code></summary>
+
 ```bash
-Watch the workqueue depth metric for backlogs
+$ kubectl -n nginx-ingress port-forward nginx-ingress-7c9d8f6b4d-x2k9p 9113:9113 &
+curl -s localhost:9113/metrics | grep workqueue_depth
 ```
+
+Sample output:
+
+```text
+# HELP nginx_ingress_controller_workqueue_depth Current depth of workqueue
+# TYPE nginx_ingress_controller_workqueue_depth gauge
+nginx_ingress_controller_workqueue_depth{class="nginx",name="taskQueue"} 0
+```
+
+**What to look for:** Depth should hover near 0. If it stays high, the controller cannot keep up (very large configs, slow reloads, or a flood of endpoint changes) and changes take longer to reach NGINX.
+
+</details>
 
 <a id="controller"></a>
 
@@ -341,9 +747,27 @@ It gathers every related object from the listers, validates CRDs, and records wa
 | **In** | Workqueue items; lister cache |
 | **Out** | Validated resource bundles for the Configurator; Events and status |
 
+**Commands** (expand for a worked example)
+
+<details>
+<summary><code>kubectl get events --field-selector involvedObject.kind=VirtualServer</code></summary>
+
 ```bash
-kubectl get events --field-selector involvedObject.kind=VirtualServer
+$ kubectl get events --field-selector involvedObject.kind=VirtualServer --sort-by=.lastTimestamp
 ```
+
+Sample output:
+
+```text
+LAST SEEN   TYPE      REASON           OBJECT                MESSAGE
+4m          Normal    AddedOrUpdated   virtualserver/cafe    Configuration for default/cafe was added or updated
+90s         Warning   Rejected         virtualserver/cafe    VirtualServer default/cafe was rejected with error: spec.upstreams[1].service: Required value
+20s         Normal    AddedOrUpdated   virtualserver/cafe    Configuration for default/cafe was added or updated
+```
+
+**What to look for:** This is the history of every sync, including the rejections that came and went. Warning events are where the controller explains why your change did not apply.
+
+</details>
 
 <a id="configurator"></a>
 
@@ -358,9 +782,40 @@ It builds an internal config model (servers, locations, upstreams, policies) and
 | **In** | Resource bundles from the controller |
 | **Out** | Config text and endpoint lists for the Manager |
 
+**Commands** (expand for a worked example)
+
+<details>
+<summary><code>kubectl exec -n nginx-ingress &lt;pod&gt; -- cat /etc/nginx/conf.d/vs_default_cafe.conf</code></summary>
+
 ```bash
-Custom templates can be set through the ConfigMap
+$ kubectl exec -n nginx-ingress nginx-ingress-7c9d8f6b4d-x2k9p -- cat /etc/nginx/conf.d/vs_default_cafe.conf
 ```
+
+Sample output:
+
+```text
+upstream vs_default_cafe_coffee-v1 {
+    zone vs_default_cafe_coffee-v1 256k;
+    random two least_conn;
+    server 10.244.1.11:80 max_fails=1 fail_timeout=10s max_conns=0;
+    server 10.244.1.12:80 max_fails=1 fail_timeout=10s max_conns=0;
+}
+split_clients $request_id $vs_default_cafe_splits_0 {
+    90% vs_default_cafe_coffee-v1;
+    10% vs_default_cafe_coffee-v2;
+}
+server {
+    listen 80;
+    server_name cafe.example.com;
+    location /coffee {
+        proxy_pass http://$vs_default_cafe_splits_0;
+    }
+}
+```
+
+**What to look for:** This is the Configurator's output for one VirtualServer. Compare it with the "Compiled nginx.conf preview" in the labs to see that split_clients, upstream and location come from your YAML.
+
+</details>
 
 <a id="manager"></a>
 
@@ -375,9 +830,27 @@ It writes config files and secrets to disk, starts the NGINX master at boot, and
 | **In** | Rendered config; endpoint changes |
 | **Out** | Files under /etc/nginx; reload signals; Plus API calls |
 
+**Commands** (expand for a worked example)
+
+<details>
+<summary><code>kubectl exec -n nginx-ingress &lt;pod&gt; -- nginx -T</code></summary>
+
 ```bash
-kubectl exec -n nginx-ingress <pod> -- nginx -T
+$ kubectl exec -n nginx-ingress nginx-ingress-7c9d8f6b4d-x2k9p -- nginx -T 2>/dev/null | grep -A3 "split_clients"
 ```
+
+Sample output:
+
+```text
+split_clients $request_id $vs_default_cafe_splits_0 {
+    90% vs_default_cafe_coffee-v1;
+    10% vs_default_cafe_coffee-v2;
+}
+```
+
+**What to look for:** nginx -T tests and prints the full config NGINX is running, across all included files. Pipe it through grep to confirm a change actually landed after the Manager wrote it and reloaded.
+
+</details>
 
 <a id="status"></a>
 
@@ -392,9 +865,26 @@ With several NIC replicas, leader election (on by default) picks one replica to 
 | **In** | Results of each sync |
 | **Out** | status fields on resources |
 
+**Commands** (expand for a worked example)
+
+<details>
+<summary><code>kubectl get vs -o wide</code></summary>
+
 ```bash
-kubectl get vs -o wide
+$ kubectl get vs -o wide
 ```
+
+Sample output:
+
+```text
+NAME       STATE   HOST               IP             EXTERNALHOSTNAME   PORTS      AGE
+cafe       Valid   cafe.example.com   203.0.113.10                      [80,443]   2d
+checkout   Valid   shop.example.com   203.0.113.10                      [80,443]   5h
+```
+
+**What to look for:** IP and PORTS are written by the leader replica's status updater. If STATE is set but IP is empty, check that the NIC Service has an external address.
+
+</details>
 
 <a id="exporter"></a>
 
@@ -409,9 +899,28 @@ Controller metrics include reload counts and timing, reload errors, resource cou
 | **In** | IC internal counters; NGINX status |
 | **Out** | /metrics for Prometheus |
 
+**Commands** (expand for a worked example)
+
+<details>
+<summary><code>curl &lt;pod-ip&gt;:9113/metrics | grep reloads_total</code></summary>
+
 ```bash
-curl <pod-ip>:9113/metrics | grep reloads_total
+$ kubectl -n nginx-ingress port-forward nginx-ingress-7c9d8f6b4d-x2k9p 9113:9113 &
+curl -s localhost:9113/metrics | grep -E "reloads_total|reload_errors_total|last_reload_milliseconds"
 ```
+
+Sample output:
+
+```text
+nginx_ingress_controller_nginx_reloads_total{class="nginx",reason="endpoints"} 142
+nginx_ingress_controller_nginx_reloads_total{class="nginx",reason="other"} 17
+nginx_ingress_controller_nginx_reload_errors_total{class="nginx"} 0
+nginx_ingress_controller_nginx_last_reload_milliseconds{class="nginx"} 184
+```
+
+**What to look for:** A high reason="endpoints" count is pod churn forcing reloads, which NGINX Plus removes. reload_errors_total should stay 0. A rising last_reload_milliseconds means the config is getting large.
+
+</details>
 
 ## NGINX processes and files (inside the same container)
 
@@ -430,10 +939,49 @@ They are generated by the Configurator and written by the Manager. Never edit th
 | **In** | Manager writes |
 | **Out** | Config the NGINX master reads on reload |
 
+**Commands** (expand for a worked example)
+
+<details>
+<summary><code>kubectl exec &lt;pod&gt; -- ls /etc/nginx/conf.d</code></summary>
+
 ```bash
-kubectl exec <pod> -- ls /etc/nginx/conf.d
-kubectl exec <pod> -- nginx -T
+$ kubectl exec -n nginx-ingress nginx-ingress-7c9d8f6b4d-x2k9p -- ls /etc/nginx/conf.d /etc/nginx/stream-conf.d
 ```
+
+Sample output:
+
+```text
+/etc/nginx/conf.d:
+default-legacy-cafe.conf
+vs_default_cafe.conf
+vs_default_checkout.conf
+
+/etc/nginx/stream-conf.d:
+ts_default_dns.conf
+```
+
+**What to look for:** One file per resource: <namespace>-<name>.conf for Ingress, vs_<namespace>_<name>.conf for VirtualServer, and ts_<namespace>_<name>.conf for TransportServer. A missing file means that resource is not Valid.
+
+</details>
+
+<details>
+<summary><code>kubectl exec &lt;pod&gt; -- nginx -T</code></summary>
+
+```bash
+$ kubectl exec -n nginx-ingress nginx-ingress-7c9d8f6b4d-x2k9p -- nginx -T 2>&1 | head -3
+```
+
+Sample output:
+
+```text
+nginx: the configuration file /etc/nginx/nginx.conf syntax is ok
+nginx: configuration file /etc/nginx/nginx.conf test is successful
+# configuration file /etc/nginx/nginx.conf:
+```
+
+**What to look for:** The first two lines confirm the config on disk is valid. After that, every file is printed with a "# configuration file" header, so you can see which resource each block came from.
+
+</details>
 
 <a id="master"></a>
 
@@ -448,9 +996,30 @@ On a reload it parses the new config. If the config is valid, it starts a new ge
 | **In** | Config files; reload signal from the Manager |
 | **Out** | Worker processes |
 
+**Commands** (expand for a worked example)
+
+<details>
+<summary><code>kubectl exec &lt;pod&gt; -- ps -ef | grep nginx</code></summary>
+
 ```bash
-kubectl exec <pod> -- ps -ef | grep nginx
+$ kubectl exec -n nginx-ingress nginx-ingress-7c9d8f6b4d-x2k9p -- ps -ef
 ```
+
+Sample output:
+
+```text
+UID   PID  PPID  CMD
+101     1     0  /nginx-ingress -nginx-configmaps=nginx-ingress/nginx-config ...
+101    14     1  nginx: master process /usr/sbin/nginx -g daemon off;
+101    61    14  nginx: worker process
+101    62    14  nginx: worker process
+101    48    14  nginx: worker process is shutting down
+101    49    14  nginx: worker process is shutting down
+```
+
+**What to look for:** PID 1 is the IC Go process and the master is its child, all in one container. "is shutting down" workers are the previous generation still draining after a reload. Many of those at once means memory pressure.
+
+</details>
 
 <a id="workers"></a>
 
@@ -465,9 +1034,26 @@ For each request a worker picks the server by Host or SNI and then the location 
 | **In** | Client connections |
 | **Out** | Proxied requests to pods; responses |
 
+**Commands** (expand for a worked example)
+
+<details>
+<summary><code>kubectl -n nginx-ingress logs &lt;pod&gt; --tail=3</code></summary>
+
 ```bash
-Access log: kubectl logs <pod>
+$ kubectl -n nginx-ingress logs nginx-ingress-7c9d8f6b4d-x2k9p --tail=3
 ```
+
+Sample output:
+
+```text
+10.0.0.5 - - [25/Nov/2026:16:02:11 +0000] "GET /coffee HTTP/1.1" 200 158 "-" "curl/8.5.0" "-"
+10.0.0.5 - - [25/Nov/2026:16:02:11 +0000] "GET /checkout HTTP/1.1" 429 179 "-" "hey/0.0.1" "-"
+I1125 16:02:12.104511       1 event.go:377] Event(v1.ObjectReference{Kind:"VirtualServer", Namespace:"default", Name:"cafe"}): type: 'Normal' reason: 'AddedOrUpdated' Configuration for default/cafe was added or updated
+```
+
+**What to look for:** The same stream mixes NGINX access logs (the 429 is limit_req rejecting at the worker) with IC controller logs (the I1125 line). Grep for the status code or the resource name to separate them.
+
+</details>
 
 <a id="plusapi"></a>
 
@@ -482,9 +1068,29 @@ Upstreams use shared-memory zones, so the IC can add or remove pod IPs through t
 | **In** | Calls from the Manager |
 | **Out** | Live upstream membership; metrics |
 
+**Commands** (expand for a worked example)
+
+<details>
+<summary><code>kubectl port-forward &lt;pod&gt; 8080:8080  # then open /dashboard.html</code></summary>
+
 ```bash
-kubectl port-forward <pod> 8080:8080  # then open /dashboard.html
+$ kubectl -n nginx-ingress port-forward nginx-ingress-7c9d8f6b4d-x2k9p 8080:8080
+# open http://localhost:8080/dashboard.html   (NGINX Plus only)
+curl -s localhost:8080/api/9/http/upstreams/vs_default_cafe_coffee-v1 | jq '.peers[] | {server, state, active}'
 ```
+
+Sample output:
+
+```text
+Forwarding from 127.0.0.1:8080 -> 8080
+{ "server": "10.244.1.11:80", "state": "up", "active": 3 }
+{ "server": "10.244.1.12:80", "state": "up", "active": 2 }
+{ "server": "10.244.2.13:80", "state": "up", "active": 4 }
+```
+
+**What to look for:** These peers were added through the Plus API with no reload. Scale the Deployment and run the curl again to see servers appear and disappear while the reload counter stays flat.
+
+</details>
 
 ## Outside the cluster
 
@@ -503,9 +1109,24 @@ Everything goes through the API server. Large automated applies are a common cau
 | **In** | YAML manifests |
 | **Out** | API writes |
 
+**Commands** (expand for a worked example)
+
+<details>
+<summary><code>kubectl apply -f cafe-vs.yaml</code></summary>
+
 ```bash
-kubectl apply -f cafe-vs.yaml
+$ kubectl apply -f cafe-vs.yaml
 ```
+
+Sample output:
+
+```text
+virtualserver.k8s.nginx.org/cafe configured
+```
+
+**What to look for:** "configured" only means the API server stored it. The IC validates it asynchronously, so follow up with kubectl get vs cafe and check that STATE is Valid.
+
+</details>
 
 <a id="client"></a>
 
@@ -520,7 +1141,28 @@ The Host header or SNI chooses the VirtualServer, the path chooses the route, an
 | **In** | - |
 | **Out** | HTTP(S), gRPC, TCP or UDP traffic |
 
+**Commands** (expand for a worked example)
+
+<details>
+<summary><code>curl -H "Host: cafe.example.com" -H "X-Beta-User: true" http://&lt;lb-ip&gt;/coffee</code></summary>
+
 ```bash
-curl -H "Host: cafe.example.com" -H "X-Beta-User: true" http://<lb-ip>/coffee
+$ for i in $(seq 1 5); do
+  curl -s -H "Host: cafe.example.com" -H "X-Beta-User: true" http://203.0.113.10/coffee | grep "Server name"
+done
 ```
+
+Sample output:
+
+```text
+Server name: coffee-v2-5b8c6d7f9-8hj2k
+Server name: coffee-v2-5b8c6d7f9-q4w7n
+Server name: coffee-v2-5b8c6d7f9-8hj2k
+Server name: coffee-v2-5b8c6d7f9-q4w7n
+Server name: coffee-v2-5b8c6d7f9-8hj2k
+```
+
+**What to look for:** With the header, every response comes from a v2 pod because of the matches rule. Drop the -H "X-Beta-User: true" and you should get mostly v1, roughly matching your split weights.
+
+</details>
 
