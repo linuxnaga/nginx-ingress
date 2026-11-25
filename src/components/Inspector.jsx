@@ -1,6 +1,8 @@
 import { X, MousePointerClick, Terminal } from 'lucide-react'
 import { NODES } from '../data/curriculum.js'
 import { Chip } from './ui.jsx'
+import { useNav } from '../nav.js'
+import { componentForNode } from '../data/components.js'
 
 const PLANE = {
   control: { label: 'Control plane', color: '#326ce5' },
@@ -9,6 +11,7 @@ const PLANE = {
 }
 
 export default function Inspector({ nodeId, onClose, mode }) {
+  const { go } = useNav()
   if (!nodeId) {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-edge p-6 text-center text-sm text-slate-500">
@@ -45,6 +48,14 @@ export default function Inspector({ nodeId, onClose, mode }) {
           </li>
         ))}
       </ul>
+      {componentForNode(nodeId) && (
+        <button
+          onClick={() => go('reference', componentForNode(nodeId))}
+          className="mt-3 text-xs font-semibold text-cyan-400 hover:text-cyan-300"
+        >
+          Read the full component reference →
+        </button>
+      )}
     </div>
   )
 }
