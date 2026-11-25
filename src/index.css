@@ -1,0 +1,42 @@
+@import "tailwindcss";
+
+@theme {
+  --color-void: #0b1120;
+  --color-panel: #111a2e;
+  --color-panel2: #16213a;
+  --color-edge: #24324f;
+  --color-nginx: #009639;
+  --color-k8s: #326ce5;
+  --color-flow: #06b6d4;
+  --font-mono: "JetBrains Mono", "Fira Code", ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+html, body, #root { height: 100%; }
+body {
+  background: #0b1120;
+  color: #e2e8f0;
+  background-image:
+    radial-gradient(circle at 15% 0%, rgba(50,108,229,0.10), transparent 40%),
+    radial-gradient(circle at 85% 10%, rgba(0,150,57,0.10), transparent 40%),
+    linear-gradient(rgba(36,50,79,0.25) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(36,50,79,0.25) 1px, transparent 1px);
+  background-size: auto, auto, 32px 32px, 32px 32px;
+}
+
+.scroll-thin::-webkit-scrollbar { width: 8px; height: 8px; }
+.scroll-thin::-webkit-scrollbar-thumb { background: #24324f; border-radius: 4px; }
+.scroll-thin::-webkit-scrollbar-track { background: transparent; }
+
+@keyframes dash { to { stroke-dashoffset: -24; } }
+.flow-dash { stroke-dasharray: 6 6; animation: dash 1s linear infinite; }
+
+@keyframes pulse-ring { 0% { opacity: .9; r: 4; } 100% { opacity: 0; r: 40; } }
+@keyframes shake { 0%,100% { transform: translateX(0) } 25% { transform: translateX(-3px) } 75% { transform: translateX(3px) } }
+.shake { animation: shake .25s linear 3; }
+
+@keyframes pop { 0% { transform: scale(.6); opacity: 0 } 60% { transform: scale(1.1); opacity: 1 } 100% { transform: scale(1) } }
+.pop { animation: pop .4s ease-out; }
+
+textarea.yaml-editor { tab-size: 2; }
+
+input[type=range].slider { accent-color: #06b6d4; }
