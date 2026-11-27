@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Library, Search, Terminal, ArrowDownToLine, ArrowUpFromLine, Workflow } from 'lucide-react'
+import { Library, Search, ArrowDownToLine, ArrowUpFromLine, Workflow } from 'lucide-react'
 import { COMPONENT_GROUPS } from '../data/components.js'
 import FlowCanvas from './FlowCanvas.jsx'
+import CommandExample from './CommandExample.jsx'
 import { useCluster } from '../lib/useCluster.js'
 
 export default function ReferenceView({ focusId }) {
@@ -46,7 +47,7 @@ export default function ReferenceView({ focusId }) {
           </div>
         </div>
         <p className="mt-3 text-sm leading-relaxed text-slate-300">
-          Every Kubernetes object, NIC custom resource, controller part and NGINX process used in the labs. Each entry says what it is, how it behaves, what goes in and out, and a command to look at it in a real cluster. Click a node in the diagram to jump to its entry.
+          Every Kubernetes object, NIC custom resource, controller part and NGINX process used in the labs. Each entry says what it is, how it behaves, what goes in and out, and commands to inspect it in a real cluster. Click any command to see a worked example with sample output and what to look for. Click a node in the diagram to jump to its entry.
         </p>
       </div>
 
@@ -97,9 +98,7 @@ export default function ReferenceView({ focusId }) {
                 </div>
                 <div className="mt-2 space-y-1">
                   {i.commands.map((c) => (
-                    <div key={c} className="flex items-start gap-2 font-mono text-[11px] text-slate-400">
-                      <Terminal size={12} className="mt-0.5 shrink-0 text-nginx" /> {c}
-                    </div>
+                    <CommandExample key={c} cmd={c} />
                   ))}
                 </div>
               </article>

@@ -157,7 +157,7 @@ export const COMPONENT_GROUPS = [
         how: 'Event handlers compare the old and new object, ignore changes that do not matter (such as status-only updates), and add the key of the affected resource to the workqueue. Listers then read from the cache, so building config never needs another API call.',
         inputs: 'Watch streams from the API server',
         outputs: 'Keys added to the workqueue',
-        commands: ['-watch-namespace=<ns> limits what is watched'],
+        commands: ["kubectl -n nginx-ingress get deploy nginx-ingress -o jsonpath='{.spec.template.spec.containers[0].args}'"],
       },
       {
         id: 'workqueue',
@@ -167,7 +167,7 @@ export const COMPONENT_GROUPS = [
         how: 'Duplicate keys collapse while they wait, so ten quick edits to one resource produce one sync. When a lot of work arrives together (startup, or a large GitOps apply) the controller handles it as a batch and reloads once at the end. Failed items are retried with backoff.',
         inputs: 'Keys from informers',
         outputs: 'One item at a time to the sync handler',
-        commands: ['Watch the workqueue depth metric for backlogs'],
+        commands: ['curl -s <pod-ip>:9113/metrics | grep workqueue'],
       },
       {
         id: 'controller',
@@ -186,7 +186,7 @@ export const COMPONENT_GROUPS = [
         how: 'It builds an internal config model (servers, locations, upstreams, policies) and renders it with Go templates: nginx.tmpl for the main file, nginx.virtualserver.tmpl and nginx.transportserver.tmpl for the CRDs. It also decides whether a change needs a reload or, on NGINX Plus, only an API call to update endpoints.',
         inputs: 'Resource bundles from the controller',
         outputs: 'Config text and endpoint lists for the Manager',
-        commands: ['Custom templates can be set through the ConfigMap'],
+        commands: ['kubectl exec -n nginx-ingress <pod> -- cat /etc/nginx/conf.d/vs_default_cafe.conf'],
       },
       {
         id: 'manager',
@@ -252,7 +252,7 @@ export const COMPONENT_GROUPS = [
         how: 'For each request a worker picks the server by Host or SNI and then the location by path. It runs policy checks in phase order (mTLS during the handshake, limit_req, allow/deny, auth_jwt, WAF), chooses an upstream through split_clients or map, and proxies straight to a pod IP. Rejections such as 429, 401 and 403 happen here.',
         inputs: 'Client connections',
         outputs: 'Proxied requests to pods; responses',
-        commands: ['Access log: kubectl logs <pod>'],
+        commands: ['kubectl -n nginx-ingress logs <pod> --tail=3'],
       },
       {
         id: 'plusapi',
